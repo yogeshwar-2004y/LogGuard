@@ -1,4 +1,4 @@
-"""Batch log correlation: sentence-transformers when installed, else TF–IDF + clustering."""
+"""Batch log correlation: optional HF Inference embeddings, else sentence-transformers, else TF–IDF."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from sklearn.cluster import AgglomerativeClustering
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import Normalizer
 
+from app.config import get_settings
 from app.schemas import CorrelationCluster
 
 logger = logging.getLogger(__name__)
@@ -42,14 +43,51 @@ def _embed_st(texts: list[str]) -> np.ndarray:
     return np.asarray(model.encode(texts, normalize_embeddings=True))
 
 
+def _embed_hf_remote(texts: list[str], model: str, token: str | None) -> np.ndarray:
+    """One embedding per log via Hugging Face Inference (feature_extraction API)."""
+    from huggingface_hub import InferenceClient
+
+    client = InferenceClient(token=token)
+    rows: list[np.ndarray] = []
+    for t in texts:
+        chunk = t[:8000]
+        arr = np.asarray(
+            client.feature_extraction(chunk, model=model, truncate=True),
+            dtype=np.float32,
+        )
+        if arr.ndim == 2 and arr.size:
+            vec = arr.mean(axis=0)
+        else:
+            vec = arr.reshape(-1)
+        rows.append(vec)
+    X = np.vstack(rows)
+    return Normalizer().fit_transform(X)
+
+
 def cluster_logs(log_texts: list[str]) -> list[CorrelationCluster]:
     if len(log_texts) < 2:
         return []
+    settings = get_settings()
     try:
-        try:
-            X = _embed_st(log_texts)
-        except Exception:
-            X = _tokenize_logs(log_texts)
+        X: np.ndarray | None = None
+        if settings.hf_use_remote_embeddings and settings.hf_token:
+            try:
+                X = _embed_hf_remote(
+                    log_texts,
+                    settings.hf_embeddings_model,
+                    settings.hf_token,
+                )
+                logger.info("Batch clustering vectors: Hugging Face Inference (embeddings)")
+            except Exception as e:
+                logger.warning("HF remote embeddings failed, trying local / TF-IDF: %s", e)
+                X = None
+        if X is None:
+            try:
+                X = _embed_st(log_texts)
+                logger.debug("Batch clustering vectors: sentence-transformers")
+            except Exception:
+                X = _tokenize_logs(log_texts)
+                logger.debug("Batch clustering vectors: TF-IDF")
         n = len(log_texts)
         clustering = AgglomerativeClustering(
             n_clusters=None,

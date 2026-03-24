@@ -1,4 +1,9 @@
-"""Application settings (env-driven for Hugging Face and deployment)."""
+"""Application settings (env-driven for Hugging Face and deployment).
+
+Render injects ``PORT`` for the HTTP server (see Dockerfile / start command).
+Set ``CORS_ORIGINS`` (or ``cors_origins``) to your Vercel production URL and any
+preview URLs you use, comma-separated.
+"""
 
 from functools import lru_cache
 
@@ -10,13 +15,17 @@ class Settings(BaseSettings):
 
     hf_token: str | None = None
 
-    # Zero-shot / NER / generation (override via env HF_*). Defaults pick models commonly routed on Inference Providers.
+    # Zero-shot / NER / generation / remote embeddings (InferenceClient → Inference Providers).
     hf_classify_model: str = "facebook/bart-large-mnli"
     hf_ner_model: str = "dslim/bert-base-NER"
     hf_generate_model: str = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+    hf_embeddings_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # When true (recommended on Render without sentence-transformers), batch clustering uses HF feature_extraction.
+    hf_use_remote_embeddings: bool = False
 
     max_log_chars: int = 50_000
     max_batch_items: int = 200
+    # Browser origins allowed by CORS (e.g. https://your-app.vercel.app,http://localhost:5173).
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property

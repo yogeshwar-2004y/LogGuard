@@ -44,6 +44,7 @@ export default function App() {
   const [batch, setBatch] = useState<BatchAnalyzeResponse | null>(null)
   const [rawLines, setRawLines] = useState<string[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [pdfLoading, setPdfLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [demoLoading, setDemoLoading] = useState(false)
   const [batchFile, setBatchFile] = useState<File | null>(null)
@@ -169,6 +170,8 @@ export default function App() {
 
   const exportPdf = useCallback(async () => {
     if (!result) return
+    setPdfLoading(true)
+    setError(null)
     try {
       const blob = await downloadPdf(result)
       const a = document.createElement('a')
@@ -178,6 +181,8 @@ export default function App() {
       URL.revokeObjectURL(a.href)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'PDF export failed')
+    } finally {
+      setPdfLoading(false)
     }
   }, [result])
 
@@ -212,7 +217,14 @@ export default function App() {
         </nav>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col" aria-busy={loading || pdfLoading}>
+        {(loading || pdfLoading) && (
+          <div
+            className="h-0.5 w-full shrink-0 animate-pulse bg-gradient-to-r from-red-950 via-red-500 to-red-950"
+            role="progressbar"
+            aria-label="Request in progress"
+          />
+        )}
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-black/20 px-4 py-3 backdrop-blur md:px-8">
           <div>
             <h1 className="text-lg font-semibold text-zinc-100">Operations dashboard</h1>
@@ -305,7 +317,8 @@ export default function App() {
               <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">Quick demos</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {[
-                  ['demo-ransomware-cef', 'Ransomware'],
+                  ['demo-ransomware-cef', 'Ransomware CEF'],
+                  ['demo-ransomware-rundll32', 'Rundll32'],
                   ['demo-iot-brute', 'IoT SSH'],
                   ['demo-health-phi', 'Healthcare'],
                   ['demo-cloud-iam', 'Cloud IAM'],
@@ -350,9 +363,11 @@ export default function App() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
+                    disabled={pdfLoading}
                     onClick={() => void exportPdf()}
-                    className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
+                    className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
                   >
+                    {pdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                     Download PDF
                   </button>
                   <button

@@ -18,6 +18,20 @@ DEMO_LOGS: list[DemoLogEntry] = [
         mitre_hint=["T1059", "T1486", "T1021"],
     ),
     DemoLogEntry(
+        id="demo-ransomware-rundll32",
+        title="Ransomware — rundll32 LOLBin from Office (suspicious DLL)",
+        category="ransomware",
+        raw_log=(
+            'EventID=1 RuleName=ProcessCreate Image="C:\\Windows\\System32\\rundll32.exe" '
+            'CommandLine="rundll32.exe shell32.dll,Control_RunDLL '
+            'C:\\Users\\Public\\AppData\\stage\\payloader.dll,DllRegisterServer" '
+            'ParentImage="C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE" '
+            'User=ACME\\jsmith IntegrityLevel=Medium'
+        ),
+        expected_severity="critical",
+        mitre_hint=["T1218", "T1486", "T1566"],
+    ),
+    DemoLogEntry(
         id="demo-iot-brute",
         title="IoT — repeated SSH failures (Syslog)",
         category="iot",

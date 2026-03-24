@@ -6,7 +6,19 @@ import type {
   TestSigmaResponse,
 } from './types'
 
-const base = () => import.meta.env.VITE_API_BASE || '/api'
+/**
+ * Production (Vercel): set VITE_API_URL to your Render API root, e.g. https://logguard-api.onrender.com
+ * (no trailing slash). Dev: leave unset to use /api → Vite proxy to localhost:8000.
+ * VITE_API_BASE is still accepted for backward compatibility.
+ */
+function apiBase(): string {
+  const raw =
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_API_BASE ||
+    ''
+  const u = String(raw).trim().replace(/\/$/, '')
+  return u || '/api'
+}
 
 async function parseJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -17,7 +29,7 @@ async function parseJson<T>(res: Response): Promise<T> {
 }
 
 export async function analyzeLog(logText: string, industry: Industry): Promise<AnalyzeResponse> {
-  const res = await fetch(`${base()}/analyze`, {
+  const res = await fetch(`${apiBase()}/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ log_text: logText, industry }),
@@ -29,12 +41,12 @@ export async function analyzeBatchUpload(file: File, industry: Industry): Promis
   const fd = new FormData()
   fd.append('industry', industry)
   fd.append('files', file)
-  const res = await fetch(`${base()}/analyze-batch-upload`, { method: 'POST', body: fd })
+  const res = await fetch(`${apiBase()}/analyze-batch-upload`, { method: 'POST', body: fd })
   return parseJson<BatchAnalyzeResponse>(res)
 }
 
 export async function analyzeBatchLines(lines: string[], industry: Industry): Promise<BatchAnalyzeResponse> {
-  const res = await fetch(`${base()}/analyze-batch`, {
+  const res = await fetch(`${apiBase()}/analyze-batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -46,12 +58,12 @@ export async function analyzeBatchLines(lines: string[], industry: Industry): Pr
 }
 
 export async function fetchDemoLogs(): Promise<DemoLogEntry[]> {
-  const res = await fetch(`${base()}/demo-logs`)
+  const res = await fetch(`${apiBase()}/demo-logs`)
   return parseJson<DemoLogEntry[]>(res)
 }
 
 export async function downloadPdf(result: AnalyzeResponse): Promise<Blob> {
-  const res = await fetch(`${base()}/report/pdf`, {
+  const res = await fetch(`${apiBase()}/report/pdf`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(result),
@@ -65,7 +77,7 @@ export async function chatFollowup(
   industry: Industry,
   contextLogSnippet?: string,
 ): Promise<string> {
-  const res = await fetch(`${base()}/chat-followup`, {
+  const res = await fetch(`${apiBase()}/chat-followup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, industry, context_log_snippet: contextLogSnippet }),
@@ -80,7 +92,7 @@ export async function chatFollowupStream(
   contextLogSnippet: string | undefined,
   onChunk: (s: string) => void,
 ): Promise<void> {
-  const res = await fetch(`${base()}/chat-followup/stream`, {
+  const res = await fetch(`${apiBase()}/chat-followup/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, industry, context_log_snippet: contextLogSnippet }),
@@ -111,7 +123,7 @@ export async function chatFollowupStream(
 }
 
 export async function testSigma(sigmaYaml: string, logs: string[]): Promise<TestSigmaResponse> {
-  const res = await fetch(`${base()}/test-sigma`, {
+  const res = await fetch(`${apiBase()}/test-sigma`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sigma_yaml: sigmaYaml, logs }),

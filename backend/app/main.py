@@ -2,6 +2,9 @@
 LogGuard AI — FastAPI application.
 
 Privacy: request bodies are not persisted; logs exist only in memory for the duration of the request.
+
+Deployment: bind with ``uvicorn`` on ``0.0.0.0`` and the ``PORT`` env var (see ``backend/Dockerfile``).
+CORS origins come from ``CORS_ORIGINS`` / ``cors_origins`` — set your Vercel site URL there.
 """
 
 from __future__ import annotations
