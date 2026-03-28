@@ -15,6 +15,16 @@ Reference dataset for style/diversity: [darkknight25/Advanced_SIEM_Dataset](http
 
 **Explainability:** True SHAP over third-party APIs is not exposed. The UI heatmap combines **NER spans**, **regex IOC** regions, and a **cyber keyword** lexicon as a practical attribution proxy.
 
+### Implemented NLP algorithms (batch analysis)
+
+| Algorithm | Role |
+|-----------|------|
+| **TF-IDF + cosine similarity** | `TfidfVectorizer` on raw logs, `cosine_similarity` between rows; single-link components with edge weight **> 0.75** become **incidents**. Per incident: mean/min pairwise cosine and **top 10 TF-IDF terms** (aggregated vector) for explainability. |
+| **Isolation Forest** | `sentence-transformers/all-MiniLM-L6-v2` embeddings, `sklearn.ensemble.IsolationForest` (`n_jobs=-1`). Scores are **MinMax-normalized** to **0–1** within the batch (higher = more anomalous vs peers). UI flags **> 0.6** as a secondary **NLP outlier** alongside transformer severity. |
+| **Existing** | Agglomerative clustering on TF-IDF / optional HF or local embeddings (`clusters`); zero-shot / NER / generation unchanged. |
+
+Batch JSON adds `incidents`, `tfidf_keywords`, `anomaly_scores`, and each `results[]` item may include `anomaly_score` and `isolation_anomaly_flag`.
+
 ### Detection rules (Sigma / YARA)
 
 Each `AnalyzeResponse` includes `detection_rules`: YAML **Sigma** (`author: LogGuard AI`, MITRE tags, `falsepositives`, level from severity) and a **YARA** snippet. The backend uses the configured generative model when available; otherwise deterministic templates from IOCs/log text are used. The UI can **copy**, **customize + download** (`.yml` / `.yar`), and **test** the Sigma against the current log or batch via `POST /test-sigma` (heuristic token match — not a full Sigma engine).
@@ -25,13 +35,17 @@ Each `AnalyzeResponse` includes `detection_rules`: YAML **Sigma** (`author: LogG
 
 ## Repository layout
 
+On disk you might name the parent folder `logGuard`; on **GitHub** the repo root is usually the project root (no extra `logGuard/` folder inside the clone):
+
 ```
-logGuard/
+./
 ├── backend/           # FastAPI app (app.main:app)
 ├── frontend/          # Vite + React
 ├── docker-compose.yml
 └── README.md
 ```
+
+**Render:** leave **Root Directory empty** (repo root). Do **not** set it to `logGuard` unless your remote repo actually contains that nested folder.
 
 ## Quick start (local)
 
@@ -64,14 +78,11 @@ npm run dev
 
 The dev server proxies `/api` → `http://127.0.0.1:8000` (see `vite.config.ts`). With no `VITE_API_URL`, the UI uses `/api`. For a production build against a remote API, set **`VITE_API_URL`** (see `frontend/.env.example`).
 
-### Optional: sentence-transformers correlation
+### Optional: extra ML pinning
 
-```bash
-cd backend
-pip install -r requirements-ml.txt
-```
+`requirements.txt` already installs **sentence-transformers** (Isolation Forest + MiniLM embeddings in batch mode, and optional local correlation vectors). Use `requirements-ml.txt` only if you want an explicit `-r requirements.txt` bundle for pinned ML stacks.
 
-If the import succeeds, batch clustering uses `all-MiniLM-L6-v2`; otherwise TF–IDF is used automatically.
+Batch **correlation** (`clusters`) still prefers local `all-MiniLM-L6-v2` when importable; otherwise TF–IDF or HF remote embeddings per `HF_USE_REMOTE_EMBEDDINGS`.
 
 ## Docker
 
@@ -88,10 +99,10 @@ docker compose up --build
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Liveness + whether `HF_TOKEN` is set |
-| `GET` | `/demo-logs` | 11 curated demo log objects (incl. ransomware CEF + rundll32 LOLBin) |
+| `GET` | `/demo-logs` | 12 curated demo log objects (incl. NLP batch lab for TF-IDF + Isolation Forest) |
 | `POST` | `/analyze` | JSON `{ "log_text", "industry" }` → full analysis |
-| `POST` | `/analyze-batch` | JSON `{ "logs": [{ "raw_log" }], "industry" }` |
-| `POST` | `/analyze-batch-upload` | multipart: `files[]`, `industry` |
+| `POST` | `/analyze-batch` | JSON `{ "logs": [{ "raw_log" }], "industry" }` → per-log results + `clusters`, **`incidents`**, **`tfidf_keywords`**, **`anomaly_scores`**, and per-result **`anomaly_score`** / **`isolation_anomaly_flag`** |
+| `POST` | `/analyze-batch-upload` | multipart: `files[]`, `industry` (same batch payload shape) |
 | `POST` | `/report/pdf` | JSON body = `AnalyzeResponse` → PDF bytes |
 | `POST` | `/chat-followup` | JSON `{ messages, industry, context_log_snippet? }` |
 | `POST` | `/chat-followup/stream` | SSE-style `data: "<chunk>"` stream |
@@ -104,7 +115,8 @@ docker compose up --build
 | Variable | Purpose |
 |----------|---------|
 | `HF_TOKEN` | Hugging Face API token |
-| `HF_CLASSIFY_MODEL` | Zero-shot model id (default `facebook/bart-large-mnli`; auto-fallbacks if 404) |
+| `HF_CLASSIFY_MODEL` | Zero-shot model id (default `typeform/distilbert-base-uncased-mnli`; falls back to Bart if set) |
+| `HF_INFERENCE_TIMEOUT` | HTTP timeout seconds for HF calls (default `90`) |
 | `HF_NER_MODEL` | Token-classification NER model id |
 | `HF_GENERATE_MODEL` | Instruct model id (default `HuggingFaceTB/SmolLM2-1.7B-Instruct`; chat + text fallbacks per model) |
 | `HF_EMBEDDINGS_MODEL` | Model id for `feature_extraction` when remote embeddings are enabled |
@@ -118,15 +130,16 @@ docker compose up --build
 
 ### Backend on Render
 
-1. Create a **Web Service** from this repo (or push the `logGuard` project).
-2. **Environment**: Docker. Set **Dockerfile path** to `backend/Dockerfile` and **Docker build context** to `backend` (same as `render.yaml`).
-3. **Start command**: leave default — the Dockerfile runs `uvicorn` on **`${PORT:-8000}`** (Render injects `PORT`).
-4. **Health check path**: `/health`.
-5. In **Environment**, add:
+1. Create a **Web Service** from this repo.
+2. **Root Directory**: **leave blank** (use repository root). If you see `Root directory "logGuard" does not exist`, you mistakenly pointed Render at a folder that only exists on your laptop — clear the field.
+3. **Environment**: Docker. Set **Dockerfile path** to `backend/Dockerfile` and **Docker build context** to `backend`.
+4. **Start command**: leave default — the Dockerfile runs `uvicorn` on **`${PORT:-8000}`** (Render injects `PORT`).
+5. **Health check path**: `/health`.
+6. In **Environment**, add:
    - **`HF_TOKEN`** — fine-grained token with *Make calls to Inference Providers* (secret).
    - **`CORS_ORIGINS`** — your Vercel URL(s), e.g. `https://logguard.vercel.app` (comma-separate multiple origins). Include `http://localhost:5173` only if you need local UI against prod API.
    - **`HF_USE_REMOTE_EMBEDDINGS`** — set to `true` so batch correlation uses Hugging Face **feature_extraction** (no local `sentence-transformers` in the slim image).
-6. Deploy and copy the public service URL (e.g. `https://logguard-api.onrender.com`).
+7. Deploy and copy the public service URL (e.g. `https://logguard-api.onrender.com`).
 
 **Non-Docker option:** Native Python runtime, root `backend/`, start command:
 

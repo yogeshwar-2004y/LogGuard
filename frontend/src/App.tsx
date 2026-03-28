@@ -1,12 +1,21 @@
 import {
+  BarChart3,
+  BookOpen,
+  FileCode2,
   FileUp,
+  Flame,
+  Fingerprint,
   LayoutDashboard,
   Loader2,
+  MessageSquare,
+  Network,
   Radar,
   ScrollText,
   Shield,
   Sparkles,
+  Target,
   Trash2,
+  Workflow,
 } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import {
@@ -21,6 +30,8 @@ import { AttackChainSection } from './components/AttackChainFlow'
 import { ChatPanel } from './components/ChatPanel'
 import { DetectionRulesCard } from './components/DetectionRulesCard'
 import { DashboardCharts } from './components/DashboardCharts'
+import { LogSimilarityAnalysis } from './components/LogSimilarityAnalysis'
+import { DashboardTabs, type DashboardTabId } from './components/DashboardTabs'
 import { HighlightedLog } from './components/HighlightedLog'
 import { IOCTable } from './components/IOCTable'
 import { MitreMatrix } from './components/MitreMatrix'
@@ -48,7 +59,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [demoLoading, setDemoLoading] = useState(false)
   const [batchFile, setBatchFile] = useState<File | null>(null)
-  const [insightTab, setInsightTab] = useState<'rules' | 'chain'>('rules')
+  const [dashboardTab, setDashboardTab] = useState<DashboardTabId>('overview')
+  const [batchIndex, setBatchIndex] = useState(0)
+
+  const showBatchNlpTab = Boolean(batch && batch.results.length >= 2)
 
   const logLinesForTest = useMemo(() => {
     if (rawLines?.length) return rawLines
@@ -71,6 +85,8 @@ export default function App() {
     setError(null)
     setBatch(null)
     setRawLines(null)
+    setBatchIndex(0)
+    setDashboardTab('overview')
     try {
       const r = await analyzeLog(t, industry)
       setResult(r)
@@ -97,6 +113,8 @@ export default function App() {
     try {
       const b = await analyzeBatchLines(lines, industry)
       setBatch(b)
+      setBatchIndex(0)
+      setDashboardTab('overview')
       setRawLines(lines)
       setResult(b.results[0] ?? null)
     } catch (e) {
@@ -132,6 +150,8 @@ export default function App() {
     try {
       const b = await analyzeBatchUpload(batchFile, industry)
       setBatch(b)
+      setBatchIndex(0)
+      setDashboardTab('overview')
       const lines = (await batchFile.text()).split(/\r?\n/).filter((l) => l.trim())
       setRawLines(lines)
       setResult(b.results[0] ?? null)
@@ -195,6 +215,27 @@ export default function App() {
     a.click()
     URL.revokeObjectURL(a.href)
   }, [result])
+
+  const dashboardTabDefs = useMemo(
+    () => [
+      { id: 'overview' as const, label: 'Overview', short: 'Home', icon: LayoutDashboard },
+      { id: 'mitre' as const, label: 'MITRE ATT&CK', short: 'MITRE', icon: Target },
+      { id: 'iocs' as const, label: 'IOCs', short: 'IOCs', icon: Fingerprint },
+      { id: 'rules' as const, label: 'Sigma / YARA', short: 'Rules', icon: FileCode2 },
+      { id: 'attack-chain' as const, label: 'Attack chain', short: 'Chain', icon: Workflow },
+      { id: 'charts' as const, label: 'Charts', short: 'Charts', icon: BarChart3 },
+      { id: 'heatmap' as const, label: 'Log heatmap', short: 'Heat', icon: Flame },
+      { id: 'playbook' as const, label: 'Playbook', short: 'Play', icon: BookOpen },
+      {
+        id: 'batch-nlp' as const,
+        label: 'Log similarity',
+        short: 'Sim',
+        icon: Network,
+      },
+      { id: 'copilot' as const, label: 'SOC co-pilot', short: 'Chat', icon: MessageSquare },
+    ],
+    [],
+  )
 
   return (
     <div className="flex min-h-svh">
@@ -317,6 +358,7 @@ export default function App() {
               <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">Quick demos</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {[
+                  ['demo-batch-nlp-lab', 'NLP batch lab'],
                   ['demo-ransomware-cef', 'Ransomware CEF'],
                   ['demo-ransomware-rundll32', 'Rundll32'],
                   ['demo-iot-brute', 'IoT SSH'],
@@ -342,151 +384,208 @@ export default function App() {
 
           <section className="flex w-full min-w-0 flex-[1.2] flex-col gap-4">
             {result && (
-              <>
-                <SeverityBanner
-                  severity={result.severity}
-                  score={result.severity_score}
-                  format={result.format_detected}
-                  ms={result.processing_time_ms}
-                />
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
-                    <h2 className="text-sm font-semibold text-zinc-200">Executive summary</h2>
-                    <p className="mt-2 text-sm leading-relaxed text-zinc-400">{result.executive_summary}</p>
-                  </div>
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
-                    <h2 className="text-sm font-semibold text-zinc-200">Risk explanation</h2>
-                    <p className="mt-2 text-sm leading-relaxed text-zinc-400">{result.risk_explanation}</p>
-                  </div>
+              <div className="flex flex-col gap-4">
+                <div className="space-y-3">
+                  {batch && batch.results.length > 1 && (
+                    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3">
+                      <label htmlFor="batch-log-idx" className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Batch log
+                      </label>
+                      <select
+                        id="batch-log-idx"
+                        value={batchIndex}
+                        onChange={(e) => {
+                          const i = Number(e.target.value)
+                          if (!batch?.results[i]) return
+                          setBatchIndex(i)
+                          setResult(batch.results[i])
+                          if (rawLines?.[i] !== undefined) setLogText(rawLines[i])
+                        }}
+                        className="min-w-[10rem] rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                      >
+                        {batch.results.map((_, i) => (
+                          <option key={i} value={i}>
+                            {i + 1} / {batch.results.length}
+                            {batch.anomaly_scores?.[i] != null && batch.anomaly_scores[i] > 0.6
+                              ? ' · outlier'
+                              : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <SeverityBanner
+                    severity={result.severity}
+                    score={result.severity_score}
+                    format={result.format_detected}
+                    ms={result.processing_time_ms}
+                    anomalyScore={batch ? (result.anomaly_score ?? null) : null}
+                    isolationAnomaly={Boolean(batch && result.isolation_anomaly_flag)}
+                  />
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={pdfLoading}
-                    onClick={() => void exportPdf()}
-                    className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
-                  >
-                    {pdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    Download PDF
-                  </button>
-                  <button
-                    type="button"
-                    onClick={exportCsv}
-                    disabled={!result.iocs.length}
-                    className="rounded-lg border border-zinc-600 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                  >
-                    Export IOCs CSV
-                  </button>
+                <DashboardTabs tabs={dashboardTabDefs} active={dashboardTab} onChange={setDashboardTab} />
+
+                <div className="min-h-[280px] rounded-xl border border-zinc-800/80 bg-zinc-950/20 p-4 sm:p-5">
+                  {dashboardTab === 'overview' && (
+                    <div className="space-y-4">
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                          <h2 className="text-sm font-semibold text-zinc-200">Executive summary</h2>
+                          <p className="mt-2 text-sm leading-relaxed text-zinc-400">{result.executive_summary}</p>
+                        </div>
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                          <h2 className="text-sm font-semibold text-zinc-200">Risk explanation</h2>
+                          <p className="mt-2 text-sm leading-relaxed text-zinc-400">{result.risk_explanation}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Exports</p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={pdfLoading}
+                            onClick={() => void exportPdf()}
+                            className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+                          >
+                            {pdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                            Download PDF report
+                          </button>
+                          <button
+                            type="button"
+                            onClick={exportCsv}
+                            disabled={!result.iocs.length}
+                            className="rounded-lg border border-zinc-600 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+                          >
+                            Export IOCs CSV
+                          </button>
+                        </div>
+                      </div>
+                      {result.model_notes && (
+                        <p className="text-xs text-zinc-600">Pipeline: {result.model_notes}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {dashboardTab === 'mitre' && (
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                      <h2 className="text-sm font-semibold text-zinc-200">MITRE ATT&amp;CK</h2>
+                      <p className="mt-1 text-xs text-zinc-500">Techniques inferred from log content and sector context.</p>
+                      <div className="mt-3">
+                        <MitreMatrix techniques={result.mitre_techniques} />
+                      </div>
+                    </div>
+                  )}
+
+                  {dashboardTab === 'iocs' && (
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                        <h2 className="text-sm font-semibold text-zinc-200">Indicators of compromise</h2>
+                        <div className="mt-3">
+                          <IOCTable iocs={result.iocs} />
+                        </div>
+                      </div>
+                      {result.iocs.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={exportCsv}
+                          className="rounded-lg border border-zinc-600 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
+                        >
+                          Export IOCs CSV
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {dashboardTab === 'rules' && (
+                    <DetectionRulesCard rules={result.detection_rules} logLines={logLinesForTest} />
+                  )}
+
+                  {dashboardTab === 'attack-chain' && (
+                    <AttackChainSection graph={result.attack_chain} batchGraphs={batchAttackChains} />
+                  )}
+
+                  {dashboardTab === 'charts' && (
+                    <DashboardCharts
+                      result={result}
+                      batch={batch?.results ?? null}
+                      rawLines={rawLines}
+                      primaryRaw={logText}
+                    />
+                  )}
+
+                  {dashboardTab === 'heatmap' && (
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                      <h2 className="text-sm font-semibold text-zinc-200">Suspicion heatmap (NER + keyword proxy)</h2>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Remote models do not expose SHAP; spans reflect NER entities, IOC-like tokens, and cyber lexicon
+                        hits.
+                      </p>
+                      <div className="mt-3 max-h-[min(24rem,50vh)] overflow-auto">
+                        <HighlightedLog text={logText} highlights={result.token_highlights} />
+                      </div>
+                    </div>
+                  )}
+
+                  {dashboardTab === 'playbook' && (
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                      <h2 className="text-sm font-semibold text-zinc-200">Sector playbook</h2>
+                      <ul className="mt-3 space-y-3 text-sm text-zinc-400">
+                        {result.playbook.items.map((p, i) => (
+                          <li key={i} className="rounded-lg border border-zinc-800/80 bg-black/20 p-3">
+                            <p className="font-medium text-zinc-200">{p.title}</p>
+                            <p className="mt-1">{p.action}</p>
+                            {p.sample_query && (
+                              <pre className="mt-2 overflow-x-auto rounded bg-zinc-900 p-2 font-mono text-xs text-red-200/90">
+                                {p.sample_query}
+                              </pre>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {dashboardTab === 'batch-nlp' && (
+                    <div className="space-y-4">
+                      <LogSimilarityAnalysis
+                        incidents={batch?.incidents ?? []}
+                        tfidfKeywords={batch?.tfidf_keywords ?? []}
+                        rawLines={rawLines}
+                        anomalyScores={batch?.anomaly_scores}
+                        hasFullBatch={showBatchNlpTab}
+                      />
+                      {showBatchNlpTab && batch && batch.clusters.length > 0 && (
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                          <h2 className="text-sm font-semibold text-zinc-200">Batch correlation (clustering)</h2>
+                          <ul className="mt-2 space-y-2 text-sm text-zinc-400">
+                            {batch.clusters.map((c) => (
+                              <li key={c.cluster_id} className="rounded border border-zinc-800 p-2">
+                                <span className="text-red-300/90">{c.theme}</span> — indices {c.log_indices.join(', ')}
+                                <p className="mt-1 font-mono text-xs text-zinc-500">{c.representative_snippet}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {dashboardTab === 'copilot' && (
+                    <ChatPanel industry={industry} contextSnippet={logText} />
+                  )}
                 </div>
-
-                <DashboardCharts
-                  result={result}
-                  batch={batch?.results ?? null}
-                  rawLines={rawLines}
-                  primaryRaw={logText}
-                />
-
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-2">
-                  <div className="flex gap-1 border-b border-zinc-800/80 px-2 pb-2">
-                    <button
-                      type="button"
-                      onClick={() => setInsightTab('rules')}
-                      className={`rounded-md px-3 py-1.5 text-xs font-medium ${
-                        insightTab === 'rules' ? 'bg-red-900/50 text-red-100' : 'text-zinc-500 hover:text-zinc-300'
-                      }`}
-                    >
-                      Detection rules
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setInsightTab('chain')}
-                      className={`rounded-md px-3 py-1.5 text-xs font-medium ${
-                        insightTab === 'chain' ? 'bg-red-900/50 text-red-100' : 'text-zinc-500 hover:text-zinc-300'
-                      }`}
-                    >
-                      Attack chain
-                    </button>
-                  </div>
-                  <div className="p-2 pt-3">
-                    {insightTab === 'rules' && (
-                      <DetectionRulesCard rules={result.detection_rules} logLines={logLinesForTest} />
-                    )}
-                    {insightTab === 'chain' && (
-                      <AttackChainSection graph={result.attack_chain} batchGraphs={batchAttackChains} />
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
-                  <h2 className="text-sm font-semibold text-zinc-200">MITRE ATT&amp;CK</h2>
-                  <div className="mt-3">
-                    <MitreMatrix techniques={result.mitre_techniques} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
-                  <h2 className="text-sm font-semibold text-zinc-200">IOCs</h2>
-                  <div className="mt-3">
-                    <IOCTable iocs={result.iocs} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
-                  <h2 className="text-sm font-semibold text-zinc-200">Suspicion heatmap (NER + keyword proxy)</h2>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Remote models do not expose SHAP; spans reflect NER entities, IOC-like tokens, and cyber lexicon hits.
-                  </p>
-                  <div className="mt-3 max-h-64 overflow-auto">
-                    <HighlightedLog text={logText} highlights={result.token_highlights} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
-                  <h2 className="text-sm font-semibold text-zinc-200">Sector playbook</h2>
-                  <ul className="mt-3 space-y-3 text-sm text-zinc-400">
-                    {result.playbook.items.map((p, i) => (
-                      <li key={i} className="rounded-lg border border-zinc-800/80 bg-black/20 p-3">
-                        <p className="font-medium text-zinc-200">{p.title}</p>
-                        <p className="mt-1">{p.action}</p>
-                        {p.sample_query && (
-                          <pre className="mt-2 overflow-x-auto rounded bg-zinc-900 p-2 font-mono text-xs text-red-200/90">
-                            {p.sample_query}
-                          </pre>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {batch && batch.clusters.length > 0 && (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
-                    <h2 className="text-sm font-semibold text-zinc-200">Batch correlation</h2>
-                    <ul className="mt-2 space-y-2 text-sm text-zinc-400">
-                      {batch.clusters.map((c) => (
-                        <li key={c.cluster_id} className="rounded border border-zinc-800 p-2">
-                          <span className="text-red-300/90">{c.theme}</span> — indices {c.log_indices.join(', ')}
-                          <p className="mt-1 font-mono text-xs text-zinc-500">{c.representative_snippet}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                <ChatPanel industry={industry} contextSnippet={logText} />
-
-                {result.model_notes && (
-                  <p className="text-xs text-zinc-600">Pipeline: {result.model_notes}</p>
-                )}
-              </>
+              </div>
             )}
 
             {!result && !loading && (
               <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-zinc-800 border-dashed p-8 text-center text-zinc-500">
                 <Radar className="mb-4 h-12 w-12 text-zinc-700" />
                 <p className="max-w-md text-sm">
-                  Run analysis to see severity, MITRE mapping, IOCs, Sigma/YARA rules, attack-chain graph, charts, and PDF
-                  export.
+                  Run analysis, then use the <span className="text-zinc-400">Analysis views</span> tabs for MITRE, IOCs,
+                  Sigma/YARA, attack chain, charts, heatmap, playbook, log similarity (TF-IDF / Isolation Forest), and SOC
+                  co-pilot.
                 </p>
               </div>
             )}

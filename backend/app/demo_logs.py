@@ -130,6 +130,21 @@ DEMO_LOGS: list[DemoLogEntry] = [
         mitre_hint=["T1021", "T1078"],
     ),
     DemoLogEntry(
+        id="demo-batch-nlp-lab",
+        title="Batch NLP lab — TF-IDF similarity + Isolation Forest",
+        category="lab",
+        raw_log=(
+            "<134>1 2024-11-10T10:00:01Z edge01 sshd[8812]: Failed password for root from 203.0.113.10 port 54201 ssh2\n"
+            "<134>1 2024-11-10T10:00:03Z edge01 sshd[8814]: Failed password for root from 203.0.113.11 port 54222 ssh2\n"
+            "<134>1 2024-11-10T10:00:05Z edge01 sshd[8816]: Failed password for root from 203.0.113.12 port 54199 ssh2\n"
+            "<134>1 2024-11-10T10:00:07Z edge01 sshd[8818]: Failed password for invalid user admin from 203.0.113.10 port 54300 ssh2\n"
+            "dns-query|host=wksta-44|qname=stager.pastebin-analog.test|qtype=TXT|rcode=NOERROR|c2_candidate=true\n"
+            "2024-11-10 10:00:25 HOST=DC01 SERVICE=wsus ACTION=approved_updates_installed kb=5032198 reboot_pending=false"
+        ),
+        expected_severity="high",
+        mitre_hint=["T1110", "T1071"],
+    ),
+    DemoLogEntry(
         id="demo-benign-patch",
         title="Benign — scheduled patching (baseline)",
         category="baseline",

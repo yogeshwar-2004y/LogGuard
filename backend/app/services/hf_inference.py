@@ -12,17 +12,22 @@ from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
-# Tried in order if primary returns 404 / no route on Inference Providers
+# Extra zero-shot models (NLI / zero-shot on HF Inference). MoritzLaurer IDs often 404 on router.
 ZERO_SHOT_MODEL_FALLBACKS = (
-    "MoritzLaurer/DeBERTa-v3-base-zeroshot-v2.0",
-    "MoritzLaurer/DeBERTa-v3-large-zeroshot-v2.0",
     "typeform/distilbert-base-uncased-mnli",
+    "facebook/bart-large-mnli",
 )
 
+# Chat completions return 400 for many models on router; text_generation (hf-inference) is tried first per model.
 GENERATE_MODEL_FALLBACKS = (
+    "Qwen/Qwen2.5-0.5B-Instruct",
     "microsoft/Phi-3-mini-4k-instruct",
     "Qwen/Qwen2.5-1.5B-Instruct",
+    "google/flan-t5-base",
 )
+
+# Router rejects huge prompts with 400; keep well under context limits.
+_MAX_GEN_PROMPT_CHARS = 10_000
 
 CYBER_CANDIDATE_LABELS = [
     "benign routine IT maintenance or expected admin activity",
@@ -35,7 +40,10 @@ CYBER_CANDIDATE_LABELS = [
 
 
 def _client(settings: Settings) -> InferenceClient:
-    return InferenceClient(token=settings.hf_token or None)
+    return InferenceClient(
+        token=settings.hf_token or None,
+        timeout=settings.hf_inference_timeout,
+    )
 
 
 async def zero_shot_classify(
@@ -108,10 +116,12 @@ def _chat_reply(c: InferenceClient, model: str, prompt: str, max_new_tokens: int
 
 
 def _text_gen_reply(c: InferenceClient, model: str, prompt: str, max_new_tokens: int) -> str:
+    # T5 is seq2seq; shorter completions are more reliable on small models.
+    mtok = min(max_new_tokens, 384) if "flan-t5" in model.lower() else max_new_tokens
     out = c.text_generation(
         prompt,
         model=model,
-        max_new_tokens=max_new_tokens,
+        max_new_tokens=mtok,
         temperature=0.2,
         return_full_text=False,
     )
@@ -124,16 +134,19 @@ def _text_gen_reply(c: InferenceClient, model: str, prompt: str, max_new_tokens:
 
 
 def _generate_one_model(settings: Settings, model: str, prompt: str, max_new_tokens: int) -> str:
-    """Instruct-tuned models usually need chat_completion; base LMs use text_generation."""
+    """Prefer text_generation (classic hf-inference) — router /v1/chat/completions often returns 400."""
     c = _client(settings)
-    for fn in (_chat_reply, _text_gen_reply):
+    last_err: str | None = None
+    for fn in (_text_gen_reply, _chat_reply):
         try:
             text = fn(c, model, prompt, max_new_tokens)
             if text:
                 return text
-        except Exception:
+        except Exception as e:
+            last_err = str(e)
+            logger.debug("generate %s via %s: %s", model, fn.__name__, e)
             continue
-    raise RuntimeError(f"no method succeeded for {model}")
+    raise RuntimeError(last_err or f"no method succeeded for {model}")
 
 
 async def text_generate(
@@ -141,6 +154,10 @@ async def text_generate(
     prompt: str,
     max_new_tokens: int = 512,
 ) -> tuple[str | None, str | None]:
+    trimmed = prompt[:_MAX_GEN_PROMPT_CHARS] if len(prompt) > _MAX_GEN_PROMPT_CHARS else prompt
+    if len(trimmed) < len(prompt):
+        logger.info("text_generate: truncated prompt %s → %s chars", len(prompt), len(trimmed))
+
     models: list[str] = []
     for m in (settings.hf_generate_model, *GENERATE_MODEL_FALLBACKS):
         if m and m not in models:
@@ -150,7 +167,7 @@ async def text_generate(
         last: Exception | None = None
         for model_id in models:
             try:
-                return _generate_one_model(settings, model_id, prompt, max_new_tokens)
+                return _generate_one_model(settings, model_id, trimmed, max_new_tokens)
             except Exception as e:
                 last = e
                 logger.warning("text_generate model=%s failed: %s", model_id, e)

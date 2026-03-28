@@ -16,9 +16,12 @@ class Settings(BaseSettings):
     hf_token: str | None = None
 
     # Zero-shot / NER / generation / remote embeddings (InferenceClient → Inference Providers).
-    hf_classify_model: str = "facebook/bart-large-mnli"
+    # DistilBERT-MNLI is smaller and tends to avoid 504s vs bart-large on shared inference.
+    hf_classify_model: str = "typeform/distilbert-base-uncased-mnli"
     hf_ner_model: str = "dslim/bert-base-NER"
     hf_generate_model: str = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+    # Seconds for HF router calls (zero-shot / NER / generation); raise if Bart or large models time out often.
+    hf_inference_timeout: float = 90.0
     hf_embeddings_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     # When true (recommended on Render without sentence-transformers), batch clustering uses HF feature_extraction.
     hf_use_remote_embeddings: bool = False

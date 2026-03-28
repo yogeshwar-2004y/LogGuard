@@ -36,6 +36,7 @@ from app.schemas import (
 from app.services.analyzer import analyze_log_text
 from app.services.correlation import cluster_logs
 from app.services.hf_inference import text_generate
+from app.services.nlp_batch_insights import compute_batch_nlp_insights
 from app.services.pdf_report import build_pdf_bytes
 from app.services.sigma_tester import test_sigma_against_logs
 
@@ -105,8 +106,30 @@ async def analyze_batch_json(body: BatchAnalyzeRequest):
 
     results = await asyncio.gather(*[one(t) for t in to_run])
     clusters = cluster_logs(to_run) if len(to_run) >= 2 else []
+    # TF-IDF + cosine incidents / Isolation Forest (CPU-heavy; off event loop)
+    incidents, tfidf_keywords, anomaly_scores = await asyncio.to_thread(
+        compute_batch_nlp_insights, to_run
+    )
+    patched: list[AnalyzeResponse] = []
+    for i, r in enumerate(results):
+        a = anomaly_scores[i] if i < len(anomaly_scores) else 0.0
+        patched.append(
+            r.model_copy(
+                update={
+                    "anomaly_score": a,
+                    "isolation_anomaly_flag": a > 0.6,
+                }
+            )
+        )
     elapsed = int((time.perf_counter() - t0) * 1000)
-    return BatchAnalyzeResponse(results=list(results), clusters=clusters, processing_time_ms=elapsed)
+    return BatchAnalyzeResponse(
+        results=patched,
+        clusters=clusters,
+        processing_time_ms=elapsed,
+        incidents=incidents,
+        tfidf_keywords=tfidf_keywords,
+        anomaly_scores=anomaly_scores,
+    )
 
 
 @app.post("/analyze-batch-upload", response_model=BatchAnalyzeResponse)

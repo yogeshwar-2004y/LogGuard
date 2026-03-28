@@ -103,6 +103,17 @@ class AnalyzeResponse(BaseModel):
     attack_chain: AttackChainGraph
     model_notes: str | None = Field(None, description="HF fallback / model routing notes")
     processing_time_ms: int
+    # Batch / Isolation Forest (optional; set on batch responses only)
+    anomaly_score: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Relative anomaly score within batch (Isolation Forest on MiniLM embeddings)",
+    )
+    isolation_anomaly_flag: bool = Field(
+        False,
+        description="True when anomaly_score exceeds secondary detector threshold",
+    )
 
 
 class BatchLogItem(BaseModel):
@@ -122,10 +133,35 @@ class CorrelationCluster(BaseModel):
     representative_snippet: str
 
 
+class TfIdfKeywordEntry(BaseModel):
+    term: str
+    score: float = Field(..., description="Aggregated TF-IDF weight for this incident")
+
+
+class SimilarityIncident(BaseModel):
+    """Logs linked by pairwise cosine similarity > threshold (TF-IDF space)."""
+
+    incident_id: int
+    log_indices: list[int]
+    mean_cosine_similarity: float = Field(..., ge=0.0, le=1.0)
+    min_cosine_similarity: float = Field(..., ge=0.0, le=1.0)
+
+
+class TfidfKeywordsByIncident(BaseModel):
+    incident_id: int
+    keywords: list[TfIdfKeywordEntry]
+
+
 class BatchAnalyzeResponse(BaseModel):
     results: list[AnalyzeResponse]
     clusters: list[CorrelationCluster]
     processing_time_ms: int
+    incidents: list[SimilarityIncident] = Field(default_factory=list)
+    tfidf_keywords: list[TfidfKeywordsByIncident] = Field(default_factory=list)
+    anomaly_scores: list[float] = Field(
+        default_factory=list,
+        description="Per-log scores aligned with results[] (0–1, higher = more anomalous in batch)",
+    )
 
 
 class DemoLogEntry(BaseModel):

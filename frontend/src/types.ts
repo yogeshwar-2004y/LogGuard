@@ -89,6 +89,9 @@ export interface AnalyzeResponse {
   attack_chain: AttackChainGraph
   model_notes?: string | null
   processing_time_ms: number
+  /** Batch: Isolation Forest on MiniLM embeddings (0–1, higher = more anomalous vs batch). */
+  anomaly_score?: number | null
+  isolation_anomaly_flag?: boolean
 }
 
 export interface DemoLogEntry {
@@ -107,10 +110,30 @@ export interface CorrelationCluster {
   representative_snippet: string
 }
 
+export interface TfIdfKeywordEntry {
+  term: string
+  score: number
+}
+
+export interface SimilarityIncident {
+  incident_id: number
+  log_indices: number[]
+  mean_cosine_similarity: number
+  min_cosine_similarity: number
+}
+
+export interface TfidfKeywordsByIncident {
+  incident_id: number
+  keywords: TfIdfKeywordEntry[]
+}
+
 export interface BatchAnalyzeResponse {
   results: AnalyzeResponse[]
   clusters: CorrelationCluster[]
   processing_time_ms: number
+  incidents?: SimilarityIncident[]
+  tfidf_keywords?: TfidfKeywordsByIncident[]
+  anomaly_scores?: number[]
 }
 
 export interface TestSigmaResponse {
