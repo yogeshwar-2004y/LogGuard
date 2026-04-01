@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     # Seconds for HF router calls (zero-shot / NER / generation); raise if Bart or large models time out often.
     hf_inference_timeout: float = 90.0
     hf_embeddings_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    # When true (recommended on Render without sentence-transformers), batch clustering uses HF feature_extraction.
-    hf_use_remote_embeddings: bool = False
+    # When true and HF_TOKEN is set, batch clustering + anomaly use HF feature_extraction (saves RAM vs local PyTorch on Render).
+    hf_use_remote_embeddings: bool = True
 
     max_log_chars: int = 50_000
     max_batch_items: int = 200

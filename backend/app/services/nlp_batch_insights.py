@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import re
-from functools import lru_cache
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
@@ -17,7 +16,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import MinMaxScaler, Normalizer
 
+from app.config import get_settings
 from app.schemas import SimilarityIncident, TfIdfKeywordEntry, TfidfKeywordsByIncident
+from app.services.hf_embeddings import embed_hf_remote, embed_local_minilm
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +29,6 @@ TOP_KEYWORDS = 10
 
 def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())[:8000]
-
-
-@lru_cache(maxsize=1)
-def _sentence_model():
-    """Lazy-load MiniLM once per worker (CPU-friendly small model)."""
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer("all-MiniLM-L6-v2")
 
 
 class _UnionFind:
@@ -140,6 +133,33 @@ def compute_tfidf_incidents(logs: list[str]) -> tuple[list[SimilarityIncident], 
     return incidents, kw_groups
 
 
+def _embed_for_anomaly(cleaned: list[str]) -> np.ndarray:
+    """Prefer HF Inference on small PaaS instances (no local PyTorch spike); else shared MiniLM; else TF-IDF."""
+    s = get_settings()
+    if s.hf_use_remote_embeddings and s.hf_token:
+        try:
+            return np.asarray(
+                embed_hf_remote(cleaned, s.hf_embeddings_model, s.hf_token),
+                dtype=np.float32,
+            )
+        except Exception as e:
+            logger.warning("HF remote embeddings for anomaly failed, trying local: %s", e)
+    try:
+        return embed_local_minilm(cleaned, batch_size=min(16, max(1, len(cleaned))))
+    except Exception as e:
+        logger.warning("Local MiniLM for anomaly failed, using TF-IDF: %s", e)
+    # No PyTorch — enough for relative anomaly in batch (Render OOM-safe)
+    vectorizer = TfidfVectorizer(
+        max_features=256,
+        ngram_range=(1, 2),
+        min_df=1,
+        token_pattern=r"(?u)\b\w\w+\b|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}",
+    )
+    X = vectorizer.fit_transform(cleaned)
+    X = Normalizer().fit_transform(X)
+    return X.toarray().astype(np.float32)
+
+
 def compute_isolation_anomaly_scores(logs: list[str]) -> list[float]:
     """
     Encode logs with MiniLM; IsolationForest score_samples (higher = more inlier).
@@ -149,20 +169,15 @@ def compute_isolation_anomaly_scores(logs: list[str]) -> list[float]:
     if n < 2:
         return [0.0] * n
 
+    cleaned = [_clean(t) for t in logs]
     try:
-        model = _sentence_model()
-        emb = model.encode(
-            [_clean(t) for t in logs],
-            normalize_embeddings=True,
-            show_progress_bar=False,
-            batch_size=min(32, n),
-        )
-        emb = np.asarray(emb, dtype=np.float32)
+        emb = _embed_for_anomaly(cleaned)
+        # n_jobs=1 avoids fork/memory spikes on small Render instances; smaller forest = faster.
         clf = IsolationForest(
-            n_estimators=min(200, max(50, n * 4)),
+            n_estimators=min(100, max(25, n * 3)),
             contamination="auto",
             random_state=42,
-            n_jobs=-1,
+            n_jobs=1,
         )
         clf.fit(emb)
         # score_samples: higher = more normal / inlier

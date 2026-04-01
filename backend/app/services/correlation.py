@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from functools import lru_cache
 
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
@@ -13,6 +12,7 @@ from sklearn.preprocessing import Normalizer
 
 from app.config import get_settings
 from app.schemas import CorrelationCluster
+from app.services.hf_embeddings import embed_hf_remote, embed_local_minilm
 
 logger = logging.getLogger(__name__)
 
@@ -31,39 +31,6 @@ def _tokenize_logs(texts: list[str]) -> np.ndarray:
     return X.toarray()
 
 
-@lru_cache(maxsize=1)
-def _st_model():
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer("all-MiniLM-L6-v2")
-
-
-def _embed_st(texts: list[str]) -> np.ndarray:
-    model = _st_model()
-    return np.asarray(model.encode(texts, normalize_embeddings=True))
-
-
-def _embed_hf_remote(texts: list[str], model: str, token: str | None) -> np.ndarray:
-    """One embedding per log via Hugging Face Inference (feature_extraction API)."""
-    from huggingface_hub import InferenceClient
-
-    client = InferenceClient(token=token)
-    rows: list[np.ndarray] = []
-    for t in texts:
-        chunk = t[:8000]
-        arr = np.asarray(
-            client.feature_extraction(chunk, model=model, truncate=True),
-            dtype=np.float32,
-        )
-        if arr.ndim == 2 and arr.size:
-            vec = arr.mean(axis=0)
-        else:
-            vec = arr.reshape(-1)
-        rows.append(vec)
-    X = np.vstack(rows)
-    return Normalizer().fit_transform(X)
-
-
 def cluster_logs(log_texts: list[str]) -> list[CorrelationCluster]:
     if len(log_texts) < 2:
         return []
@@ -72,7 +39,7 @@ def cluster_logs(log_texts: list[str]) -> list[CorrelationCluster]:
         X: np.ndarray | None = None
         if settings.hf_use_remote_embeddings and settings.hf_token:
             try:
-                X = _embed_hf_remote(
+                X = embed_hf_remote(
                     log_texts,
                     settings.hf_embeddings_model,
                     settings.hf_token,
@@ -83,7 +50,9 @@ def cluster_logs(log_texts: list[str]) -> list[CorrelationCluster]:
                 X = None
         if X is None:
             try:
-                X = _embed_st(log_texts)
+                X = embed_local_minilm(
+                    [re.sub(r"\s+", " ", t.lower())[:8000] for t in log_texts],
+                )
                 logger.debug("Batch clustering vectors: sentence-transformers")
             except Exception:
                 X = _tokenize_logs(log_texts)
