@@ -28,8 +28,8 @@ class Settings(BaseSettings):
 
     max_log_chars: int = 50_000
     max_batch_items: int = 200
-    # Browser origins allowed by CORS (e.g. https://your-app.vercel.app,http://localhost:5173).
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,https://log-guard-seven.vercel.app/"
+    # Browser origins allowed by CORS (e.g. https://your-app.vercel.app,http://localhost:5173,http://localhost:5173,http://127.0.0.1:5173).
+    cors_origins: str = "https://log-guard-seven.vercel.app"
 
     @property
     def cors_origins_list(self) -> list[str]:
