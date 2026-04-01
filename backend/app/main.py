@@ -41,6 +41,7 @@ from app.services.pdf_report import build_pdf_bytes
 from app.services.sigma_tester import test_sigma_against_logs
 
 logging.basicConfig(level=logging.INFO)
+_log = logging.getLogger(__name__)
 
 app = FastAPI(
     title="LogGuard AI",
@@ -49,10 +50,17 @@ app = FastAPI(
 )
 
 _settings = get_settings()
+_log.info(
+    "CORS allow_origins=%s allow_origin_regex=%s",
+    _settings.cors_origins_list,
+    _settings.cors_origin_regex,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_settings.cors_origins_list,
-    allow_credentials=True,
+    allow_origin_regex=_settings.cors_origin_regex,
+    # Must match frontend fetch() (default credentials mode is "same-origin", no cookies to API).
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
